@@ -41,7 +41,7 @@ export class Device {
   }
 
   private createDeviceBody(onProgress?: (progress: number, message: string) => void) {
-    const { deviceThickness, rimHeight, gridSize, pinSpacing, pinWidth } = this.config;
+    const { deviceThickness, rimHeight } = this.config;
     const dims = this.getDeviceDimensions();
     
     if (onProgress) onProgress(10, 'Creating device base...');
