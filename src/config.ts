@@ -31,14 +31,14 @@ export type SimulationConfig = {
 
 export const defaultConfig: SimulationConfig = {
   // Pin Field
-  gridSize: 40,
-  pinSpacing: 0.8,
-  pinWidth: 0.5, // Smaller radius so holes are visible when pins are flush
+  gridSize: 50,
+  pinSpacing: 0.2, // Halved from 0.4 for 2x density
+  pinWidth: 0.125, // Halved from 0.25 to fit denser spacing
   
   // Height Range
   minHeight: 0,
   maxHeight: 2,
-  amplitude: 0.5, // Height scaling (0-0.5), clamped to respect minHeight/maxHeight limits
+  amplitude: 0.25, // Height scaling (0-0.25), clamped to respect minHeight/maxHeight limits
   
   // Motion
   responseSpeed: 0.15,
@@ -51,7 +51,7 @@ export const defaultConfig: SimulationConfig = {
   // Device Physical Form
   deviceWidth: 40,
   deviceDepth: 40,
-  deviceThickness: 4,
-  rimHeight: 0.8,
+  deviceThickness: 1.5, // Reduced from 4 for sleeker profile
+  rimHeight: 0.5, // Reduced from 0.8 for subtler rim
 };
 

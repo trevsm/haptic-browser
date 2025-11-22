@@ -22,7 +22,7 @@ export class Device {
    */
   private getDeviceDimensions() {
     const { gridSize, pinSpacing } = this.config;
-    const bezelWidth = 2.0; // cm - border around the pin field
+    const bezelWidth = 0.5; // cm - half size bezel
     
     // Field width extends from center of first pin to center of last pin
     const fieldWidth = (gridSize - 1) * pinSpacing;
@@ -46,24 +46,22 @@ export class Device {
     
     if (onProgress) onProgress(10, 'Creating device base...');
     
-    // White plastic material for device body
+    // Premium white plastic material for device body (Apple style)
     const bodyMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff, // Pure white
-      roughness: 0.7, // Slight sheen but mostly matte
+      roughness: 0.4, // Smooth premium plastic finish
       metalness: 0.0, // No metalness - pure plastic
     });
     
-    // White plastic material for frame (same as body)
+    // Premium white plastic material for frame (same as body)
     const frameMaterial = new THREE.MeshStandardMaterial({
       color: 0xffffff, // Pure white
-      roughness: 0.7,
+      roughness: 0.4,
       metalness: 0.0,
     });
     
-    // Create frame plate with holes for pins
-    const frameThickness = 0.3; // cm - thickness of the frame plate
-    const holeClearance = 0.03; // cm - extra space around pin for clearance
-    const holeRadius = pinWidth / 2 + holeClearance;
+    // Create frame plate (solid for performance with dense grids)
+    const frameThickness = 0.2; // cm - thin frame for sleeker profile
     
     // Main base body - flush with frame top, extends downward
     // Frame top is at frameThickness, base top aligns with frame top
@@ -83,25 +81,21 @@ export class Device {
     // Frame sits at y = 0, with its bottom at 0 and top at frameThickness
     const frameY = 0;
     
-    // Create frame using CSG-like approach: start with solid plate, subtract holes
-    // For simplicity, we'll create a frame with individual hole geometries
-    if (onProgress) onProgress(30, 'Creating frame with holes...');
-    this.createFrameWithHoles(
-      dims.width,
-      dims.depth,
-      frameThickness,
-      frameY,
-      gridSize,
-      pinSpacing,
-      holeRadius,
-      frameMaterial,
-      onProgress
-    );
+    // Create simple solid frame (no holes for performance with dense grids)
+    if (onProgress) onProgress(30, 'Creating frame...');
+    const frameGeometry = new THREE.BoxGeometry(dims.width, frameThickness, dims.depth);
+    const frameMesh = new THREE.Mesh(frameGeometry, frameMaterial);
+    frameMesh.position.y = frameY + frameThickness / 2;
+    frameMesh.castShadow = true;
+    frameMesh.receiveShadow = true;
+    this.group.add(frameMesh);
+    
+    if (onProgress) onProgress(50, 'Frame created!');
     
     if (onProgress) onProgress(50, 'Adding device rims...');
     
     // Side walls/rims around the frame
-    const rimThickness = 0.3; // cm
+    const rimThickness = 0.2; // cm - thinner rims for refined edges
     const rimY = frameThickness;
     
     // North rim
@@ -141,105 +135,6 @@ export class Device {
     this.group.add(westRim);
   }
 
-  /**
-   * Create frame plate with actual holes for each pin
-   * Uses THREE.Shape with holes and ExtrudeGeometry to create proper geometry
-   */
-  private createFrameWithHoles(
-    width: number,
-    depth: number,
-    thickness: number,
-    yPosition: number,
-    gridSize: number,
-    pinSpacing: number,
-    holeRadius: number,
-    material: THREE.MeshStandardMaterial,
-    onProgress?: (progress: number, message: string) => void
-  ) {
-    // Calculate field dimensions (same as PinField)
-    const fieldWidth = (gridSize - 1) * pinSpacing;
-    const offsetX = -fieldWidth / 2;
-    const offsetZ = -fieldWidth / 2;
-    
-    // Create frame shape with holes using THREE.Shape
-    const frameShape = new THREE.Shape();
-    
-    // Define the outer rectangle of the frame
-    const halfWidth = width / 2;
-    const halfDepth = depth / 2;
-    
-    frameShape.moveTo(-halfWidth, -halfDepth);
-    frameShape.lineTo(halfWidth, -halfDepth);
-    frameShape.lineTo(halfWidth, halfDepth);
-    frameShape.lineTo(-halfWidth, halfDepth);
-    frameShape.lineTo(-halfWidth, -halfDepth);
-    
-    // Add holes for each pin position with higher quality (more segments)
-    const holes: THREE.Path[] = [];
-    const holeSegments = 32; // Increased from 16 to 32 for smoother circles
-    const totalHoles = gridSize * gridSize;
-    const updateInterval = Math.max(1, Math.floor(totalHoles / 10)); // Update every 10% of holes
-    
-    for (let x = 0; x < gridSize; x++) {
-      for (let y = 0; y < gridSize; y++) {
-        const holeIndex = x * gridSize + y;
-        const holeX = offsetX + x * pinSpacing;
-        const holeZ = offsetZ + y * pinSpacing;
-        
-        // Create circular hole path with more segments for smoother edges
-        const holePath = new THREE.Path();
-        for (let i = 0; i <= holeSegments; i++) {
-          const angle = (i / holeSegments) * Math.PI * 2;
-          const px = holeX + Math.cos(angle) * holeRadius;
-          const pz = holeZ + Math.sin(angle) * holeRadius;
-          if (i === 0) {
-            holePath.moveTo(px, pz);
-          } else {
-            holePath.lineTo(px, pz);
-          }
-        }
-        holes.push(holePath);
-        
-        // Update progress periodically
-        if (onProgress && (holeIndex % updateInterval === 0 || holeIndex === totalHoles - 1)) {
-          const progress = 30 + ((holeIndex + 1) / totalHoles) * 20; // 30-50% range
-          onProgress(progress, `Creating frame holes... ${holeIndex + 1}/${totalHoles}`);
-        }
-      }
-    }
-    
-    // Add all holes to the shape
-    frameShape.holes = holes;
-    
-    // Extrude the shape to create the frame with holes
-    // Add slight bevel for rounded edges
-    const extrudeSettings = {
-      depth: thickness,
-      bevelEnabled: true,
-      bevelThickness: 0.02, // Small bevel for rounded edges
-      bevelSize: 0.02,
-      bevelSegments: 2, // Smooth bevel
-    };
-    
-    const frameGeometry = new THREE.ExtrudeGeometry(frameShape, extrudeSettings);
-    
-    // Rotate to align with horizontal frame (extrude creates vertical by default)
-    // After rotation, the extrude depth (thickness) becomes the Y-axis height
-    frameGeometry.rotateX(-Math.PI / 2);
-    
-    // The extrude geometry center is at the shape center after rotation
-    // Translate geometry so its bottom edge aligns with y=0
-    // This ensures when we position at yPosition, the bottom is at base top
-    frameGeometry.translate(0, thickness / 2, 0);
-    
-    const frameMesh = new THREE.Mesh(frameGeometry, material);
-    // Position frame so its bottom is exactly at base top surface (deviceThickness / 2)
-    // After translation, geometry bottom is at mesh position
-    frameMesh.position.y = yPosition;
-    frameMesh.castShadow = true;
-    frameMesh.receiveShadow = true;
-    this.group.add(frameMesh);
-  }
 
   getGroup(): THREE.Group {
     return this.group;
