@@ -4,6 +4,9 @@ import { PinField } from './PinField';
 import { Device } from './Device';
 import { defaultConfig } from './config';
 import type { SimulationConfig } from './config';
+import { NavigationManager } from './navigation';
+import { createWikipediaDemo } from './demos/wikipedia';
+import type { ContentBlock } from './shapePage';
 import './style.css';
 
 /**
@@ -21,9 +24,7 @@ class HapticBrowser {
   private device!: Device;
   
   private clock!: THREE.Clock;
-  private fpsElement!: HTMLElement;
-  private frameCount: number = 0;
-  private lastFpsUpdate: number = 0;
+  private navigationManager!: NavigationManager;
 
   constructor() {
     // Ensure DOM is ready
@@ -31,6 +32,34 @@ class HapticBrowser {
       document.addEventListener('DOMContentLoaded', () => this.init());
     } else {
       this.init();
+    }
+  }
+
+  /**
+   * Load configuration from localStorage, merging with defaults
+   */
+  private loadConfig(): SimulationConfig {
+    try {
+      const saved = localStorage.getItem('hapticBrowserConfig');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Merge with defaults to ensure all properties exist
+        return { ...defaultConfig, ...parsed };
+      }
+    } catch (error) {
+      console.warn('Failed to load config from localStorage:', error);
+    }
+    return { ...defaultConfig };
+  }
+
+  /**
+   * Save configuration to localStorage
+   */
+  private saveConfig() {
+    try {
+      localStorage.setItem('hapticBrowserConfig', JSON.stringify(this.config));
+    } catch (error) {
+      console.warn('Failed to save config to localStorage:', error);
     }
   }
 
@@ -50,6 +79,9 @@ class HapticBrowser {
 
   private init() {
     try {
+      // Load saved configuration from localStorage
+      this.config = this.loadConfig();
+      
       // Make body visible now that CSS has loaded
       document.body.style.visibility = 'visible';
       document.body.style.opacity = '1';
@@ -68,9 +100,9 @@ class HapticBrowser {
       
       this.updateLoader('Initializing Three.js scene...', 10);
       
-      // Setup Three.js scene - brighter background
+      // Setup Three.js scene - Apple-style clean white background
       this.scene = new THREE.Scene();
-      this.scene.background = new THREE.Color(0xf0f0f0);
+      this.scene.background = new THREE.Color(0xfafafa);
       
       // Setup camera
       this.camera = new THREE.PerspectiveCamera(
@@ -79,7 +111,7 @@ class HapticBrowser {
         0.1,
         1000
       );
-      this.camera.position.set(40, 35, 40);
+      this.camera.position.set(0, 1.2, 6);
       this.camera.lookAt(0, 0, 0);
       
       this.updateLoader('Setting up renderer...', 15);
@@ -119,7 +151,7 @@ class HapticBrowser {
       this.controls = new OrbitControls(this.camera, this.renderer.domElement);
       this.controls.enableDamping = true;
       this.controls.dampingFactor = 0.05;
-      this.controls.maxPolarAngle = Math.PI / 2 - 0.1; // Don't go below ground
+      this.controls.maxPolarAngle = Math.PI; // Allow full rotation around device
       
       this.updateLoader('Setting up lighting...', 25);
       
@@ -147,17 +179,34 @@ class HapticBrowser {
       
       this.updateLoader('Setting up UI controls...', 95);
       
+      // Initialize navigation manager
+      this.navigationManager = new NavigationManager();
+      
       // Setup UI controls
       this.setupUI();
+      
+      // Initialize mode-specific controls visibility
+      const controlsDiv = document.getElementById('controls');
+      if (controlsDiv) {
+        this.updateModeSpecificControls(controlsDiv);
+      }
+      
+      // Setup navigation controls
+      this.setupNavigation();
+      
+      // Setup click handler for reading mode
+      this.setupClickHandler();
       
       // Setup hide UI button
       this.setupHideUIButton();
       
-      // Setup FPS counter
-      this.setupFPSDisplay();
-      
       // Clock for delta time
       this.clock = new THREE.Clock();
+      
+      // Load initial demo if in web mode
+      if (this.config.mode === 'web') {
+        this.loadWikipediaDemo();
+      }
       
       // Handle window resize
       window.addEventListener('resize', () => this.onWindowResize());
@@ -200,45 +249,39 @@ class HapticBrowser {
   }
 
   private setupLighting() {
-    // Ambient light for overall scene illumination
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    // Ambient light for overall scene illumination - Apple-style bright and even
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     this.scene.add(ambientLight);
     
-    // Main directional key light with shadows
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    keyLight.position.set(30, 40, 20);
+    // Main directional key light with soft shadows - Apple product photography style
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    keyLight.position.set(30, 45, 25);
     keyLight.castShadow = true;
     // High quality shadow map settings
-    keyLight.shadow.mapSize.width = 2048; // Increased from 1024 for better quality
-    keyLight.shadow.mapSize.height = 2048; // Increased from 1024 for better quality
+    keyLight.shadow.mapSize.width = 2048;
+    keyLight.shadow.mapSize.height = 2048;
     keyLight.shadow.camera.near = 0.5;
     keyLight.shadow.camera.far = 100;
     keyLight.shadow.camera.left = -30;
     keyLight.shadow.camera.right = 30;
     keyLight.shadow.camera.top = 30;
     keyLight.shadow.camera.bottom = -30;
-    keyLight.shadow.bias = -0.0001; // Reduce shadow acne
-    keyLight.shadow.normalBias = 0.02; // Additional bias for better quality
+    keyLight.shadow.bias = -0.0001;
+    keyLight.shadow.normalBias = 0.02;
+    keyLight.shadow.radius = 3; // Softer shadows for Apple aesthetic
     this.scene.add(keyLight);
     
-    // Fill light from opposite side for softer shadows and better depth perception
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    fillLight.position.set(-20, 25, -20);
-    fillLight.castShadow = false; // Only key light casts shadows for performance
+    // Fill light from opposite side for minimal shadows - Apple-style studio lighting
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    fillLight.position.set(-25, 30, -25);
+    fillLight.castShadow = false;
     this.scene.add(fillLight);
     
-    // Ground plane - use simpler material for performance
-    const groundGeometry = new THREE.PlaneGeometry(200, 200);
-    const groundMaterial = new THREE.MeshLambertMaterial({
-      color: 0xf5f5f5,
-    });
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    // Frame top is at 0.2 (frameThickness), base extends down by deviceThickness from there
-    const frameThickness = 0.2;
-    ground.position.y = frameThickness - this.config.deviceThickness - 0.1;
-    ground.receiveShadow = true; // Enable shadow receiving for realism
-    this.scene.add(ground);
+    // Subtle rim light for depth and dimension - Apple product photography technique
+    const rimLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    rimLight.position.set(0, 20, -40);
+    rimLight.castShadow = false;
+    this.scene.add(rimLight);
   }
 
   private setupUI() {
@@ -258,8 +301,8 @@ class HapticBrowser {
       // Create toggle button
       const toggleButton = document.createElement('button');
       toggleButton.className = 'controls-toggle';
-      toggleButton.textContent = '−';
-      toggleButton.setAttribute('aria-label', 'Collapse controls');
+      toggleButton.textContent = '+';
+      toggleButton.setAttribute('aria-label', 'Expand controls');
       
       // Wrap header text in a span
       const headerText = document.createElement('span');
@@ -276,6 +319,10 @@ class HapticBrowser {
       const controlsContent = document.createElement('div');
       controlsContent.className = 'controls-content';
       controlsContent.style.transition = 'max-height 0.3s ease-out, opacity 0.3s ease-out';
+      // Start collapsed
+      controlsContent.style.maxHeight = '0';
+      controlsContent.style.opacity = '0';
+      controlsContent.style.overflow = 'hidden';
       
       // Move existing content (if any) into controlsContent
       while (controlsDiv.firstChild && controlsDiv.firstChild !== header) {
@@ -286,8 +333,11 @@ class HapticBrowser {
       controlsDiv.insertBefore(patternContainer, header.nextSibling);
       controlsDiv.insertBefore(controlsContent, patternContainer.nextSibling);
       
+      // Start collapsed
+      controlsDiv.classList.add('collapsed');
+      
       // Toggle functionality
-      let isExpanded = true;
+      let isExpanded = false;
       const toggleControls = () => {
         isExpanded = !isExpanded;
         if (isExpanded) {
@@ -318,15 +368,39 @@ class HapticBrowser {
       (controlsDiv as any).patternContainer = patternContainer;
     }
     
-    // Pattern Mode - only in collapsed view (always visible)
+    // Mode selector - always visible (pattern or web)
+    this.addControl(controlsDiv, 'Mode', 'select',
+      ['pattern', 'web'],
+      this.config.mode,
+      (value) => {
+        this.config.mode = value as SimulationConfig['mode'];
+        this.pinField.updateConfig({ mode: this.config.mode });
+        // Show/hide relevant controls based on mode
+        this.updateModeSpecificControls(controlsDiv);
+        // Load demo when switching to web mode
+        if (this.config.mode === 'web') {
+          this.loadWikipediaDemo();
+        } else {
+          // Clear page when switching to pattern mode
+          this.pinField.setShapePage(null);
+          this.navigationManager.setShapePage(null);
+        }
+        this.saveConfig();
+      },
+      true // collapsed view (always visible)
+    );
+    
+    // Pattern Mode - only shown in pattern mode
     this.addControl(controlsDiv, 'Pattern Mode', 'select', 
       ['wave', 'ripple', 'gaussian', 'noise', 'flat'],
       this.config.patternMode,
       (value) => {
         this.config.patternMode = value as SimulationConfig['patternMode'];
         this.pinField.updateConfig({ patternMode: this.config.patternMode });
+        this.saveConfig();
       },
-      true // collapsed view (always visible)
+      true, // collapsed view (always visible)
+      'pattern' // only visible in pattern mode
     );
     
     // Grid Size
@@ -343,6 +417,11 @@ class HapticBrowser {
         gridSizeRebuildTimeout = window.setTimeout(() => {
           // Rebuild device and pin field with new grid size
           this.rebuildScene();
+          // Reload demo if in web mode to match new grid size
+          if (this.config.mode === 'web') {
+            this.loadWikipediaDemo();
+          }
+          this.saveConfig();
           gridSizeRebuildTimeout = null;
         }, 300); // Wait 300ms after user stops moving slider
       }
@@ -350,21 +429,36 @@ class HapticBrowser {
     
     // Amplitude
     this.addControl(controlsDiv, 'Amplitude', 'range',
-      { min: 0, max: 0.25, step: 0.05 },
+      { min: 0, max: 2, step: 0.1 },
       this.config.amplitude,
       (value) => {
         this.config.amplitude = parseFloat(value);
         this.pinField.updateConfig({ amplitude: this.config.amplitude });
+        this.saveConfig();
       }
     );
     
-    // Pattern Speed
+    // Pattern Speed (only in pattern mode)
     this.addControl(controlsDiv, 'Pattern Speed', 'range',
       { min: 0, max: 5, step: 0.1 },
       this.config.patternSpeed,
       (value) => {
         this.config.patternSpeed = parseFloat(value);
         this.pinField.updateConfig({ patternSpeed: this.config.patternSpeed });
+        this.saveConfig();
+      },
+      false,
+      'pattern' // only visible in pattern mode
+    );
+    
+    // Color by Height (debug visualization)
+    this.addControl(controlsDiv, 'Color by Height', 'checkbox',
+      null,
+      this.config.colorByHeight,
+      (value) => {
+        this.config.colorByHeight = value === 'true';
+        this.pinField.updateConfig({ colorByHeight: this.config.colorByHeight });
+        this.saveConfig();
       }
     );
     
@@ -381,6 +475,7 @@ class HapticBrowser {
         const responseSpeed = 1.01 - sliderValue; // Maps 0.01->0.99, 1.0->0.01
         this.config.responseSpeed = responseSpeed;
         this.pinField.updateConfig({ responseSpeed });
+        this.saveConfig();
       }
     );
     
@@ -398,11 +493,12 @@ class HapticBrowser {
   private addControl(
     parent: HTMLElement,
     label: string,
-    type: 'range' | 'select',
+    type: 'range' | 'select' | 'checkbox',
     options: any,
     defaultValue: any,
     onChange: (value: string) => void,
-    collapsedView: boolean = false
+    collapsedView: boolean = false,
+    dataMode?: 'pattern' | 'web' // Control is only visible in this mode
   ) {
     // Get the appropriate container
     const controlsDiv = document.getElementById('controls');
@@ -425,11 +521,31 @@ class HapticBrowser {
       controlGroup.classList.add('pattern-selector-group');
     }
     
+    // Add data attribute for mode-specific visibility
+    if (dataMode) {
+      controlGroup.setAttribute('data-mode', dataMode);
+      // Initially hide if not matching current mode
+      if (this.config.mode !== dataMode) {
+        controlGroup.style.display = 'none';
+      }
+    }
+    
     const labelEl = document.createElement('label');
     labelEl.textContent = label;
     controlGroup.appendChild(labelEl);
     
-    if (type === 'range') {
+    if (type === 'checkbox') {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = defaultValue === true || defaultValue === 'true';
+      input.className = 'control-checkbox';
+      
+      input.addEventListener('change', () => {
+        onChange(input.checked.toString());
+      });
+      
+      controlGroup.appendChild(input);
+    } else if (type === 'range') {
       const input = document.createElement('input');
       input.type = 'range';
       input.min = options.min;
@@ -471,11 +587,33 @@ class HapticBrowser {
     targetParent.appendChild(controlGroup);
   }
 
+  /**
+   * Update visibility of mode-specific controls
+   */
+  private updateModeSpecificControls(controlsDiv: HTMLElement) {
+    const modeSpecificControls = controlsDiv.querySelectorAll('[data-mode]');
+    modeSpecificControls.forEach((control) => {
+      const controlEl = control as HTMLElement;
+      const controlMode = controlEl.getAttribute('data-mode');
+      if (controlMode === this.config.mode) {
+        controlEl.style.display = '';
+      } else {
+        controlEl.style.display = 'none';
+      }
+    });
+  }
+
   private animate = () => {
     requestAnimationFrame(this.animate);
     
     const deltaTime = this.clock.getDelta();
-    const elapsedTime = this.clock.getElapsedTime();
+    
+    // Update navigation focus indicator
+    if (this.config.mode === 'web') {
+      const focusedPrimitive = this.navigationManager.getFocusedPrimitive();
+      this.pinField.setFocusedPrimitive(focusedPrimitive);
+      this.updateNavigationStatus();
+    }
     
     // Update pin field
     this.pinField.update(deltaTime);
@@ -485,17 +623,6 @@ class HapticBrowser {
     
     // Render scene
     this.renderer.render(this.scene, this.camera);
-    
-    // Update FPS counter (update every 0.5 seconds)
-    this.frameCount++;
-    if (elapsedTime - this.lastFpsUpdate >= 0.5) {
-      const fps = Math.round(this.frameCount / (elapsedTime - this.lastFpsUpdate));
-      this.frameCount = 0;
-      this.lastFpsUpdate = elapsedTime;
-      if (this.fpsElement) {
-        this.fpsElement.textContent = `FPS: ${fps}`;
-      }
-    }
   };
 
   private rebuildScene() {
@@ -544,34 +671,6 @@ class HapticBrowser {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  private setupFPSDisplay() {
-    const fpsDiv = document.createElement('div');
-    fpsDiv.id = 'fps-display';
-    fpsDiv.style.cssText = `
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      background: rgba(0, 0, 0, 0.7);
-      color: #0f0;
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 14px;
-      font-weight: bold;
-      z-index: 1000;
-      pointer-events: none;
-    `;
-    fpsDiv.textContent = 'FPS: --';
-    this.fpsElement = fpsDiv;
-    
-    const appContent = document.getElementById('app-content');
-    if (appContent) {
-      appContent.appendChild(fpsDiv);
-    } else {
-      document.body.appendChild(fpsDiv);
-    }
-  }
-
   private setupHideUIButton() {
     const button = document.createElement('button');
     button.id = 'hide-ui-button';
@@ -582,18 +681,15 @@ class HapticBrowser {
     
     button.addEventListener('click', () => {
       uiHidden = !uiHidden;
-      const info = document.getElementById('info');
       const controls = document.getElementById('controls');
       const instructions = document.getElementById('instructions');
       
       if (uiHidden) {
-        if (info) info.style.display = 'none';
         if (controls) controls.style.display = 'none';
         if (instructions) instructions.style.display = 'none';
         button.textContent = 'Show UI';
         button.setAttribute('aria-label', 'Show UI');
       } else {
-        if (info) info.style.display = '';
         if (controls) controls.style.display = '';
         if (instructions) instructions.style.display = '';
         button.textContent = 'Hide UI';
@@ -615,6 +711,193 @@ class HapticBrowser {
       return !!(canvas.getContext('webgl') || canvas.getContext('webgl2'));
     } catch (e) {
       return false;
+    }
+  }
+
+  /**
+   * Load Wikipedia demo page
+   */
+  private loadWikipediaDemo() {
+    // Use current config gridSize for the demo
+    const demoPage = createWikipediaDemo(this.config.gridSize);
+    this.pinField.setShapePage(demoPage);
+    this.navigationManager.setShapePage(demoPage);
+  }
+  
+  /**
+   * Setup click handler (removed - using keyboard only)
+   */
+  private setupClickHandler() {
+    // Keyboard-only navigation - no click handler needed
+  }
+
+  /**
+   * Setup navigation controls and keyboard handlers
+   */
+  private setupNavigation() {
+    // Create navigation status display
+    const navStatus = document.createElement('div');
+    navStatus.id = 'navigation-status';
+    navStatus.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 12px 16px;
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+      z-index: 10;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      font-size: 13px;
+      color: #333;
+      min-width: 200px;
+      display: none;
+    `;
+    
+    const appContent = document.getElementById('app-content');
+    if (appContent) {
+      appContent.appendChild(navStatus);
+    } else {
+      document.body.appendChild(navStatus);
+    }
+    
+    // Store reference for updates
+    (this as any).navStatusElement = navStatus;
+    
+    // Keyboard handlers
+    window.addEventListener('keydown', (e) => {
+      // Only handle navigation keys if in web mode
+      if (this.config.mode !== 'web') return;
+      
+      // Don't interfere with typing in inputs
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
+        return;
+      }
+      
+      // If in reading mode, only allow Space/Escape to exit
+      if (this.pinField.isReadingMode()) {
+        switch (e.key) {
+          case ' ':
+          case 'Backspace':
+          case 'Escape':
+            e.preventDefault();
+            this.pinField.exitReadingMode();
+            break;
+        }
+        return; // Don't process other keys in reading mode
+      }
+      
+      // Normal navigation mode
+      switch (e.key) {
+        case 'r':
+        case 'R':
+          // Toggle region/block mode
+          e.preventDefault();
+          this.navigationManager.toggleMode();
+          break;
+          
+        case 'ArrowRight':
+        case 'ArrowDown':
+          // Next item
+          e.preventDefault();
+          if (this.navigationManager.getMode() === 'region') {
+            this.navigationManager.nextLandmark();
+          } else {
+            this.navigationManager.nextBlock();
+          }
+          break;
+          
+        case 'ArrowLeft':
+        case 'ArrowUp':
+          // Previous item
+          e.preventDefault();
+          if (this.navigationManager.getMode() === 'region') {
+            this.navigationManager.previousLandmark();
+          } else {
+            this.navigationManager.previousBlock();
+          }
+          break;
+          
+        case 'Tab':
+          // Next item
+          if (!e.shiftKey) {
+            e.preventDefault();
+            if (this.navigationManager.getMode() === 'region') {
+              this.navigationManager.nextLandmark();
+            } else {
+              this.navigationManager.nextBlock();
+            }
+          } else {
+            // Previous item
+            e.preventDefault();
+            if (this.navigationManager.getMode() === 'region') {
+              this.navigationManager.previousLandmark();
+            } else {
+              this.navigationManager.previousBlock();
+            }
+          }
+          break;
+          
+        case ' ':
+          // Space: Enter reading mode for focused block (text or image)
+          e.preventDefault();
+          const focusedPrimitive = this.navigationManager.getFocusedPrimitive();
+          
+          // Debug logging
+          console.log('Space pressed, focused primitive:', focusedPrimitive);
+          
+          // Check if it's a ContentBlock
+          if (focusedPrimitive && 'blockType' in focusedPrimitive) {
+            const block = focusedPrimitive as ContentBlock;
+            
+            // Check if it's an image block
+            if (block.blockType === 'media' && block.imageUrl) {
+              console.log('Found image block, entering image mode');
+              this.pinField.enterImageMode(block);
+            } else if (block.text) {
+              console.log('Found content block with text:', block.text);
+              this.pinField.enterReadingMode(block.text);
+            }
+          } else if (focusedPrimitive) {
+            console.log('Focused primitive is not a ContentBlock');
+            // Check if it's a landmark with blocks
+            if ('landmarkType' in focusedPrimitive) {
+              console.log('This is a landmark. Switch to Block mode (press R) to focus on content blocks.');
+            }
+          }
+          break;
+      }
+    });
+  }
+
+  /**
+   * Update navigation status display
+   */
+  private updateNavigationStatus() {
+    const navStatus = (this as any).navStatusElement as HTMLElement | undefined;
+    if (!navStatus) return;
+    
+    const navInstructions = document.getElementById('nav-instructions');
+    
+    if (this.config.mode === 'web') {
+      if (this.pinField.isReadingMode()) {
+        navStatus.style.display = 'block';
+        navStatus.textContent = 'Reading Mode - Press Backspace to go back';
+        if (navInstructions) navInstructions.style.display = 'none';
+      } else {
+        navStatus.style.display = 'block';
+        const statusText = this.navigationManager.getStatusString();
+        const mode = this.navigationManager.getMode();
+        if (mode === 'region') {
+          navStatus.textContent = `${statusText} (Press R for Block mode to read content)`;
+        } else {
+          navStatus.textContent = `${statusText} (Press Space to read)`;
+        }
+        if (navInstructions) navInstructions.style.display = 'block';
+      }
+    } else {
+      navStatus.style.display = 'none';
+      if (navInstructions) navInstructions.style.display = 'none';
     }
   }
 }

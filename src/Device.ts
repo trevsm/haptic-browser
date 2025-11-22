@@ -3,7 +3,7 @@ import type { SimulationConfig } from './config';
 
 /**
  * Device represents the physical body/housing of the haptic display
- * Includes the base, frame with holes for pins, and sides
+ * Includes the base
  */
 export class Device {
   private config: SimulationConfig;
@@ -22,7 +22,7 @@ export class Device {
    */
   private getDeviceDimensions() {
     const { gridSize, pinSpacing } = this.config;
-    const bezelWidth = 0.5; // cm - half size bezel
+    const bezelWidth = 0.1; // cm - minimal bezel width
     
     // Field width extends from center of first pin to center of last pin
     const fieldWidth = (gridSize - 1) * pinSpacing;
@@ -40,99 +40,148 @@ export class Device {
     };
   }
 
+  /**
+   * Create rounded box geometry for premium Apple-style appearance
+   */
+  private createRoundedBox(width: number, height: number, depth: number, radius: number): THREE.BufferGeometry {
+    const shape = new THREE.Shape();
+    const x = width / 2;
+    const y = depth / 2;
+    
+    // Create rounded rectangle shape
+    shape.moveTo(-x + radius, -y);
+    shape.lineTo(x - radius, -y);
+    shape.quadraticCurveTo(x, -y, x, -y + radius);
+    shape.lineTo(x, y - radius);
+    shape.quadraticCurveTo(x, y, x - radius, y);
+    shape.lineTo(-x + radius, y);
+    shape.quadraticCurveTo(-x, y, -x, y - radius);
+    shape.lineTo(-x, -y + radius);
+    shape.quadraticCurveTo(-x, -y, -x + radius, -y);
+    
+    const extrudeSettings = {
+      depth: height,
+      bevelEnabled: true,
+      bevelThickness: 0.02,
+      bevelSize: 0.02,
+      bevelSegments: 12, // Increased for smoother beveled edges
+      curveSegments: 40 // High quality curve segments for smooth border radiuses
+    };
+    
+    const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    geometry.rotateX(Math.PI / 2);
+    
+    return geometry;
+  }
+
   private createDeviceBody(onProgress?: (progress: number, message: string) => void) {
-    const { deviceThickness, rimHeight } = this.config;
+    const { deviceThickness } = this.config;
     const dims = this.getDeviceDimensions();
     
     if (onProgress) onProgress(10, 'Creating device base...');
     
-    // Premium white plastic material for device body (Apple style)
+    // Premium aluminum-style material for device body (Apple aesthetic)
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff, // Pure white
-      roughness: 0.4, // Smooth premium plastic finish
-      metalness: 0.0, // No metalness - pure plastic
+      color: 0xf5f5f7, // Apple-style light aluminum/silver
+      roughness: 0.1, // Very smooth, almost mirror-like finish
+      metalness: 0.15, // Subtle metallic sheen
     });
     
-    // Premium white plastic material for frame (same as body)
-    const frameMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff, // Pure white
-      roughness: 0.4,
-      metalness: 0.0,
-    });
+    const cornerRadius = 0.3; // Generous corner radius for Apple aesthetic
     
-    // Create frame plate (solid for performance with dense grids)
-    const frameThickness = 0.2; // cm - thin frame for sleeker profile
-    
-    // Main base body - flush with frame top, extends downward
-    // Frame top is at frameThickness, base top aligns with frame top
-    const frameTopY = frameThickness;
-    const baseGeometry = new THREE.BoxGeometry(
+    // Main base body - top surface at y = 0 (reference level for pins)
+    const baseGeometry = this.createRoundedBox(
       dims.width,
       deviceThickness,
-      dims.depth
+      dims.depth,
+      cornerRadius
     );
     const baseMesh = new THREE.Mesh(baseGeometry, bodyMaterial);
-    // Position base so its top surface is flush with frame top
-    baseMesh.position.y = frameTopY - deviceThickness / 2;
+    // Position base so its top surface is at y = 0
+    baseMesh.position.y = -deviceThickness / 2;
     baseMesh.castShadow = true;
     baseMesh.receiveShadow = true;
     this.group.add(baseMesh);
     
-    // Frame sits at y = 0, with its bottom at 0 and top at frameThickness
-    const frameY = 0;
+    // Add antenna bands similar to iPhone design
+    this.createAntennaBands(dims);
     
-    // Create simple solid frame (no holes for performance with dense grids)
-    if (onProgress) onProgress(30, 'Creating frame...');
-    const frameGeometry = new THREE.BoxGeometry(dims.width, frameThickness, dims.depth);
-    const frameMesh = new THREE.Mesh(frameGeometry, frameMaterial);
-    frameMesh.position.y = frameY + frameThickness / 2;
-    frameMesh.castShadow = true;
-    frameMesh.receiveShadow = true;
-    this.group.add(frameMesh);
+    if (onProgress) onProgress(100, 'Device base created!');
+  }
+
+  /**
+   * Create white antenna bands around the device perimeter
+   * Bands wrap around the edges following the device contours
+   */
+  private createAntennaBands(dims: { width: number; depth: number }) {
+    const { deviceThickness } = this.config;
+    const bandMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff, // White bands
+      roughness: 0.3,
+      metalness: 0.05,
+    });
     
-    if (onProgress) onProgress(50, 'Frame created!');
+    const bandWidth = 0.03; // Width of antenna band in cm
+    const cornerRadius = 0.3; // Match device corner radius
+    const bezelInset = 0.025; // Gap between band and device edge (cm)
+    const bandPositions = [1.58]; // Position band at bottom of device
     
-    if (onProgress) onProgress(50, 'Adding device rims...');
-    
-    // Side walls/rims around the frame
-    const rimThickness = 0.2; // cm - thinner rims for refined edges
-    const rimY = frameThickness;
-    
-    // North rim
-    const northRim = new THREE.Mesh(
-      new THREE.BoxGeometry(dims.width, rimHeight, rimThickness),
-      bodyMaterial
-    );
-    northRim.position.set(0, rimY + rimHeight / 2, -dims.depth / 2 + rimThickness / 2);
-    northRim.castShadow = true;
-    this.group.add(northRim);
-    
-    // South rim
-    const southRim = new THREE.Mesh(
-      new THREE.BoxGeometry(dims.width, rimHeight, rimThickness),
-      bodyMaterial
-    );
-    southRim.position.set(0, rimY + rimHeight / 2, dims.depth / 2 - rimThickness / 2);
-    southRim.castShadow = true;
-    this.group.add(southRim);
-    
-    // East rim
-    const eastRim = new THREE.Mesh(
-      new THREE.BoxGeometry(rimThickness, rimHeight, dims.depth - rimThickness * 2),
-      bodyMaterial
-    );
-    eastRim.position.set(dims.width / 2 - rimThickness / 2, rimY + rimHeight / 2, 0);
-    eastRim.castShadow = true;
-    this.group.add(eastRim);
-    
-    // West rim
-    const westRim = new THREE.Mesh(
-      new THREE.BoxGeometry(rimThickness, rimHeight, dims.depth - rimThickness * 2),
-      bodyMaterial
-    );
-    westRim.position.set(-dims.width / 2 + rimThickness / 2, rimY + rimHeight / 2, 0);
-    westRim.castShadow = true;
-    this.group.add(westRim);
+    // Create bands that wrap around the device edges
+    bandPositions.forEach(positionRatio => {
+      const yPos = -deviceThickness * positionRatio;
+      
+      // Create a continuous band that wraps around all four edges
+      // Using a rounded rectangle path that follows the device perimeter with bezel inset
+      const shape = new THREE.Shape();
+      const halfWidth = dims.width / 2 - bezelInset; // Inset from device edge
+      const halfDepth = dims.depth / 2 - bezelInset; // Inset from device edge
+      const innerRadius = cornerRadius - bandWidth / 2;
+      const outerRadius = cornerRadius + bandWidth / 2;
+      
+      // Outer edge of band (following device edge)
+      shape.moveTo(-halfWidth + outerRadius, -halfDepth);
+      shape.lineTo(halfWidth - outerRadius, -halfDepth);
+      shape.quadraticCurveTo(halfWidth, -halfDepth, halfWidth, -halfDepth + outerRadius);
+      shape.lineTo(halfWidth, halfDepth - outerRadius);
+      shape.quadraticCurveTo(halfWidth, halfDepth, halfWidth - outerRadius, halfDepth);
+      shape.lineTo(-halfWidth + outerRadius, halfDepth);
+      shape.quadraticCurveTo(-halfWidth, halfDepth, -halfWidth, halfDepth - outerRadius);
+      shape.lineTo(-halfWidth, -halfDepth + outerRadius);
+      shape.quadraticCurveTo(-halfWidth, -halfDepth, -halfWidth + outerRadius, -halfDepth);
+      
+      // Inner edge of band (hole)
+      const holePath = new THREE.Path();
+      const holeInset = bandWidth;
+      const holeHalfWidth = halfWidth - holeInset;
+      const holeHalfDepth = halfDepth - holeInset;
+      
+      holePath.moveTo(-holeHalfWidth + innerRadius, -holeHalfDepth);
+      holePath.lineTo(holeHalfWidth - innerRadius, -holeHalfDepth);
+      holePath.quadraticCurveTo(holeHalfWidth, -holeHalfDepth, holeHalfWidth, -holeHalfDepth + innerRadius);
+      holePath.lineTo(holeHalfWidth, holeHalfDepth - innerRadius);
+      holePath.quadraticCurveTo(holeHalfWidth, holeHalfDepth, holeHalfWidth - innerRadius, holeHalfDepth);
+      holePath.lineTo(-holeHalfWidth + innerRadius, holeHalfDepth);
+      holePath.quadraticCurveTo(-holeHalfWidth, holeHalfDepth, -holeHalfWidth, holeHalfDepth - innerRadius);
+      holePath.lineTo(-holeHalfWidth, -holeHalfDepth + innerRadius);
+      holePath.quadraticCurveTo(-holeHalfWidth, -holeHalfDepth, -holeHalfWidth + innerRadius, -holeHalfDepth);
+      
+      shape.holes.push(holePath);
+      
+      // Extrude the band shape to give it thickness
+      const extrudeSettings = {
+        depth: 0.001, // Very thin extrusion to sit flush on device surface
+        bevelEnabled: false
+      };
+      
+      const bandGeometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+      bandGeometry.rotateX(Math.PI / 2); // Rotate to align with device
+      
+      const band = new THREE.Mesh(bandGeometry, bandMaterial);
+      band.position.set(0, yPos, 0);
+      band.castShadow = true;
+      band.receiveShadow = true;
+      this.group.add(band);
+    });
   }
 
 
