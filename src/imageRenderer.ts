@@ -405,7 +405,7 @@ function loadImage(
       }
     };
 
-    img.onerror = (event) => {
+    img.onerror = () => {
       if (useProxy) {
         // Already tried proxy, give up
         const formatHint = isSupportedImageFormat(url)
