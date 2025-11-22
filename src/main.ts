@@ -12,15 +12,15 @@ import './style.css';
  */
 class HapticBrowser {
   private config: SimulationConfig = defaultConfig;
-  private scene: THREE.Scene;
-  private camera: THREE.PerspectiveCamera;
-  private renderer: THREE.WebGLRenderer;
-  private controls: OrbitControls;
+  private scene!: THREE.Scene;
+  private camera!: THREE.PerspectiveCamera;
+  private renderer!: THREE.WebGLRenderer;
+  private controls!: OrbitControls;
   
-  private pinField: PinField;
-  private device: Device;
+  private pinField!: PinField;
+  private device!: Device;
   
-  private clock: THREE.Clock;
+  private clock!: THREE.Clock;
 
   constructor() {
     // Ensure DOM is ready
@@ -31,16 +31,43 @@ class HapticBrowser {
     }
   }
 
+  private updateLoader(message: string, progress: number) {
+    const loaderMessage = document.getElementById('loader-message');
+    const progressBar = document.getElementById('progress-bar');
+    const loaderProgress = document.getElementById('loader-progress');
+    
+    if (loaderMessage) loaderMessage.textContent = message;
+    if (progressBar) {
+      // Force a reflow to ensure smooth animation
+      progressBar.offsetHeight;
+      progressBar.style.width = `${progress}%`;
+    }
+    if (loaderProgress) loaderProgress.textContent = `${Math.round(progress)}%`;
+  }
+
   private init() {
     try {
+      // Make body visible now that CSS has loaded
+      document.body.style.visibility = 'visible';
+      document.body.style.opacity = '1';
+      
+      // Progress callback for real-time updates
+      const updateProgress = (progress: number, message: string) => {
+        this.updateLoader(message, progress);
+      };
+      
+      this.updateLoader('Checking WebGL support...', 5);
+      
       // Check WebGL support
       if (!this.isWebGLAvailable()) {
         throw new Error('WebGL is not supported in this browser');
       }
       
-      // Setup Three.js scene
+      this.updateLoader('Initializing Three.js scene...', 10);
+      
+      // Setup Three.js scene - brighter background
       this.scene = new THREE.Scene();
-      this.scene.background = new THREE.Color(0x1a1a1a);
+      this.scene.background = new THREE.Color(0xf0f0f0);
       
       // Setup camera
       this.camera = new THREE.PerspectiveCamera(
@@ -51,6 +78,8 @@ class HapticBrowser {
       );
       this.camera.position.set(40, 35, 40);
       this.camera.lookAt(0, 0, 0);
+      
+      this.updateLoader('Setting up renderer...', 15);
       
       // Setup renderer
       this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -69,9 +98,14 @@ class HapticBrowser {
       canvas.style.height = '100%';
       canvas.style.zIndex = '0';
       
-      document.body.appendChild(canvas);
+      const appContent = document.getElementById('app-content');
+      if (appContent) {
+        appContent.appendChild(canvas);
+      } else {
+        document.body.appendChild(canvas);
+      }
       
-      console.log('Three.js renderer initialized, canvas appended to body');
+      this.updateLoader('Configuring controls...', 20);
     
       // Setup orbit controls
       this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -79,18 +113,37 @@ class HapticBrowser {
       this.controls.dampingFactor = 0.05;
       this.controls.maxPolarAngle = Math.PI / 2 - 0.1; // Don't go below ground
       
+      this.updateLoader('Setting up lighting...', 25);
+      
       // Setup lighting
       this.setupLighting();
       
-      // Create device and pin field
-      this.device = new Device(this.config);
+      // Create device and pin field with real progress tracking
+      // Device creation: 5-50% (45% of total)
+      this.updateLoader('Creating device model...', 5);
+      this.device = new Device(this.config, (progress, message) => {
+        // Map device progress (0-100) to overall progress (5-50)
+        const overallProgress = 5 + (progress / 100) * 45;
+        updateProgress(overallProgress, message);
+      });
       this.scene.add(this.device.getGroup());
       
-      this.pinField = new PinField(this.config);
+      // Pin field creation: 50-95% (45% of total)
+      this.updateLoader('Generating pin field...', 50);
+      this.pinField = new PinField(this.config, (progress, message) => {
+        // Map pin field progress (0-100) to overall progress (50-95)
+        const overallProgress = 50 + (progress / 100) * 45;
+        updateProgress(overallProgress, message);
+      });
       this.scene.add(this.pinField.getGroup());
+      
+      this.updateLoader('Setting up UI controls...', 95);
       
       // Setup UI controls
       this.setupUI();
+      
+      // Setup hide UI button
+      this.setupHideUIButton();
       
       // Clock for delta time
       this.clock = new THREE.Clock();
@@ -98,16 +151,33 @@ class HapticBrowser {
       // Handle window resize
       window.addEventListener('resize', () => this.onWindowResize());
       
+      this.updateLoader('Rendering scene...', 98);
+      
       // Do an initial render to verify everything works
       this.renderer.render(this.scene, this.camera);
-      console.log('Initial render complete');
+      
+      this.updateLoader('Rendering...', 100);
       
       // Start animation loop
       this.animate();
       
-      console.log('HapticBrowser initialized successfully');
-      console.log('Scene objects:', this.scene.children.length);
-      console.log('Canvas dimensions:', canvas.width, 'x', canvas.height);
+      // Hide loader and show content after a brief delay to ensure render is complete
+      setTimeout(() => {
+        const loader = document.getElementById('loader');
+        const appContent = document.getElementById('app-content');
+        
+        if (loader) {
+          loader.classList.add('hidden');
+        }
+        
+        if (appContent) {
+          appContent.style.display = 'block';
+          // Use requestAnimationFrame to ensure smooth transition
+          requestAnimationFrame(() => {
+            appContent.classList.add('loaded');
+          });
+        }
+      }, 300);
     } catch (error) {
       console.error('Error initializing HapticBrowser:', error);
       // Display error message to user
@@ -119,12 +189,12 @@ class HapticBrowser {
   }
 
   private setupLighting() {
-    // Ambient light for soft fill
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+    // Brighter ambient light for overall scene illumination
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     this.scene.add(ambientLight);
     
     // Strong directional key light to emphasize relief
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
     keyLight.position.set(30, 40, 20);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.width = 2048;
@@ -137,21 +207,28 @@ class HapticBrowser {
     keyLight.shadow.camera.bottom = -30;
     this.scene.add(keyLight);
     
-    // Rim light from opposite side
-    const rimLight = new THREE.DirectionalLight(0x6688ff, 0.4);
-    rimLight.position.set(-20, 15, -20);
-    this.scene.add(rimLight);
+    // Fill light from opposite side for softer shadows
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    fillLight.position.set(-20, 25, -20);
+    this.scene.add(fillLight);
     
-    // Ground plane for reference (optional)
+    // Additional top light for even illumination
+    const topLight = new THREE.DirectionalLight(0xffffff, 0.4);
+    topLight.position.set(0, 50, 0);
+    this.scene.add(topLight);
+    
+    // Ground plane - lighter for better contrast
     const groundGeometry = new THREE.PlaneGeometry(200, 200);
     const groundMaterial = new THREE.MeshStandardMaterial({
-      color: 0x0a0a0a,
+      color: 0xf5f5f5,
       roughness: 1,
       metalness: 0,
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -this.config.deviceThickness - 0.1;
+    // Frame top is at 0.3, base extends down by deviceThickness from there
+    const frameThickness = 0.3;
+    ground.position.y = frameThickness - this.config.deviceThickness - 0.1;
     ground.receiveShadow = true;
     this.scene.add(ground);
   }
@@ -160,14 +237,88 @@ class HapticBrowser {
     const controlsDiv = document.getElementById('controls');
     if (!controlsDiv) return;
     
-    // Pattern Mode
+    // Add collapsible header with toggle button
+    const header = controlsDiv.querySelector('h3');
+    if (header) {
+      header.style.cursor = 'pointer';
+      header.style.userSelect = 'none';
+      header.style.display = 'flex';
+      header.style.justifyContent = 'space-between';
+      header.style.alignItems = 'center';
+      header.style.marginBottom = '16px';
+      
+      // Create toggle button
+      const toggleButton = document.createElement('button');
+      toggleButton.className = 'controls-toggle';
+      toggleButton.textContent = '−';
+      toggleButton.setAttribute('aria-label', 'Collapse controls');
+      
+      // Wrap header text in a span
+      const headerText = document.createElement('span');
+      headerText.textContent = header.textContent;
+      header.innerHTML = '';
+      header.appendChild(headerText);
+      header.appendChild(toggleButton);
+      
+      // Create container for pattern selector (always visible)
+      const patternContainer = document.createElement('div');
+      patternContainer.className = 'pattern-selector-collapsed';
+      
+      // Create container for controls content (collapsible)
+      const controlsContent = document.createElement('div');
+      controlsContent.className = 'controls-content';
+      controlsContent.style.transition = 'max-height 0.3s ease-out, opacity 0.3s ease-out';
+      
+      // Move existing content (if any) into controlsContent
+      while (controlsDiv.firstChild && controlsDiv.firstChild !== header) {
+        controlsDiv.removeChild(controlsDiv.firstChild);
+      }
+      
+      // Insert patternContainer and controlsContent after header
+      controlsDiv.insertBefore(patternContainer, header.nextSibling);
+      controlsDiv.insertBefore(controlsContent, patternContainer.nextSibling);
+      
+      // Toggle functionality
+      let isExpanded = true;
+      const toggleControls = () => {
+        isExpanded = !isExpanded;
+        if (isExpanded) {
+          controlsContent.style.maxHeight = '1000px';
+          controlsContent.style.opacity = '1';
+          controlsContent.style.overflow = 'visible';
+          toggleButton.textContent = '−';
+          toggleButton.setAttribute('aria-label', 'Collapse controls');
+          controlsDiv.classList.remove('collapsed');
+        } else {
+          controlsContent.style.maxHeight = '0';
+          controlsContent.style.opacity = '0';
+          controlsContent.style.overflow = 'hidden';
+          toggleButton.textContent = '+';
+          toggleButton.setAttribute('aria-label', 'Expand controls');
+          controlsDiv.classList.add('collapsed');
+        }
+      };
+      
+      header.addEventListener('click', toggleControls);
+      toggleButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleControls();
+      });
+      
+      // Store references for adding controls
+      (controlsDiv as any).controlsContent = controlsContent;
+      (controlsDiv as any).patternContainer = patternContainer;
+    }
+    
+    // Pattern Mode - only in collapsed view (always visible)
     this.addControl(controlsDiv, 'Pattern Mode', 'select', 
       ['wave', 'ripple', 'gaussian', 'noise', 'flat'],
       this.config.patternMode,
       (value) => {
         this.config.patternMode = value as SimulationConfig['patternMode'];
         this.pinField.updateConfig({ patternMode: this.config.patternMode });
-      }
+      },
+      true // collapsed view (always visible)
     );
     
     // Grid Size
@@ -183,7 +334,7 @@ class HapticBrowser {
     
     // Amplitude
     this.addControl(controlsDiv, 'Amplitude', 'range',
-      { min: 0, max: 1, step: 0.05 },
+      { min: 0, max: 0.5, step: 0.05 },
       this.config.amplitude,
       (value) => {
         this.config.amplitude = parseFloat(value);
@@ -211,15 +362,15 @@ class HapticBrowser {
       }
     );
     
-    // Physics Mode
-    this.addControl(controlsDiv, 'Physics Mode', 'select',
-      ['ideal', 'plausible'],
-      this.config.physicsMode,
-      (value) => {
-        this.config.physicsMode = value as SimulationConfig['physicsMode'];
-        this.pinField.updateConfig({ physicsMode: this.config.physicsMode });
-      }
-    );
+    // Physics Mode - always plausible, removed from UI
+    // this.addControl(controlsDiv, 'Physics Mode', 'select',
+    //   ['ideal', 'plausible'],
+    //   this.config.physicsMode,
+    //   (value) => {
+    //     this.config.physicsMode = value as SimulationConfig['physicsMode'];
+    //     this.pinField.updateConfig({ physicsMode: this.config.physicsMode });
+    //   }
+    // );
   }
 
   private addControl(
@@ -228,10 +379,29 @@ class HapticBrowser {
     type: 'range' | 'select',
     options: any,
     defaultValue: any,
-    onChange: (value: string) => void
+    onChange: (value: string) => void,
+    collapsedView: boolean = false
   ) {
+    // Get the appropriate container
+    const controlsDiv = document.getElementById('controls');
+    let targetParent: HTMLElement;
+    
+    if (collapsedView && controlsDiv && (controlsDiv as any).patternContainer) {
+      // Add to collapsed pattern container
+      targetParent = (controlsDiv as any).patternContainer;
+    } else if (controlsDiv && (controlsDiv as any).controlsContent) {
+      // Add to expanded controls content
+      targetParent = (controlsDiv as any).controlsContent;
+    } else {
+      // Fallback to parent
+      targetParent = parent;
+    }
+    
     const controlGroup = document.createElement('div');
     controlGroup.className = 'control-group';
+    if (collapsedView) {
+      controlGroup.classList.add('pattern-selector-group');
+    }
     
     const labelEl = document.createElement('label');
     labelEl.textContent = label;
@@ -276,7 +446,7 @@ class HapticBrowser {
       controlGroup.appendChild(select);
     }
     
-    parent.appendChild(controlGroup);
+    targetParent.appendChild(controlGroup);
   }
 
   private animate = () => {
@@ -298,6 +468,43 @@ class HapticBrowser {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  private setupHideUIButton() {
+    const button = document.createElement('button');
+    button.id = 'hide-ui-button';
+    button.textContent = 'Hide UI';
+    button.setAttribute('aria-label', 'Toggle UI visibility');
+    
+    let uiHidden = false;
+    
+    button.addEventListener('click', () => {
+      uiHidden = !uiHidden;
+      const info = document.getElementById('info');
+      const controls = document.getElementById('controls');
+      const instructions = document.getElementById('instructions');
+      
+      if (uiHidden) {
+        if (info) info.style.display = 'none';
+        if (controls) controls.style.display = 'none';
+        if (instructions) instructions.style.display = 'none';
+        button.textContent = 'Show UI';
+        button.setAttribute('aria-label', 'Show UI');
+      } else {
+        if (info) info.style.display = '';
+        if (controls) controls.style.display = '';
+        if (instructions) instructions.style.display = '';
+        button.textContent = 'Hide UI';
+        button.setAttribute('aria-label', 'Hide UI');
+      }
+    });
+    
+    const appContent = document.getElementById('app-content');
+    if (appContent) {
+      appContent.appendChild(button);
+    } else {
+      document.body.appendChild(button);
+    }
   }
 
   private isWebGLAvailable(): boolean {
