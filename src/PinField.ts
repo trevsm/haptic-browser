@@ -18,6 +18,8 @@ export class PinField {
   private config: SimulationConfig;
   private group: THREE.Group;
   private instancedMesh!: THREE.InstancedMesh;
+  private pinMaterial!: THREE.MeshStandardMaterial;
+  private colorByHeightMaterial!: THREE.MeshBasicMaterial;
   private targetHeights: number[][] = [];
   private currentHeights: number[][] = [];
   private previousHeights: number[][] = []; // Track previous heights for dirty checking
@@ -53,6 +55,11 @@ export class PinField {
 
     this.initializeHeightArrays();
     this.createPins(onProgress);
+
+    // If color-by-height is enabled from saved config, initialize colors
+    if (this.config.colorByHeight) {
+      this.updateAllPinColors();
+    }
   }
 
   /**
@@ -99,12 +106,17 @@ export class PinField {
 
     if (onProgress) onProgress(10, "Creating pin material...");
 
-    // Material for thin cylinders representing lines
-    const pinMaterial = new THREE.MeshStandardMaterial({
+    // Base material for pins in normal (non-debug) mode
+    this.pinMaterial = new THREE.MeshStandardMaterial({
       color: 0x888888, // Grey color
       roughness: 0.3, // Smooth surface
       metalness: 0.1, // Slight metallic sheen
-      vertexColors: this.config.colorByHeight, // Enable vertex colors only if colorByHeight is enabled
+      vertexColors: false, // Debug colors are applied via a separate material
+    });
+
+    // Unlit material for debug color-by-height mode (colors not affected by lighting)
+    this.colorByHeightMaterial = new THREE.MeshBasicMaterial({
+      vertexColors: true,
     });
 
     if (onProgress) onProgress(30, "Building pin geometry...");
@@ -125,11 +137,11 @@ export class PinField {
     // Create instanced mesh for all pins (GPU instancing for performance)
     // Subtract 4 for the corner pins that we skip
     const totalPins = gridSize * gridSize - 4;
-    this.instancedMesh = new THREE.InstancedMesh(
-      pinGeometry,
-      pinMaterial,
-      totalPins
-    );
+    const initialMaterial = this.config.colorByHeight
+      ? this.colorByHeightMaterial
+      : this.pinMaterial;
+
+    this.instancedMesh = new THREE.InstancedMesh(pinGeometry, initialMaterial, totalPins);
     this.instancedMesh.castShadow = false; // Disable shadows for performance
     this.instancedMesh.receiveShadow = false;
 
@@ -676,10 +688,6 @@ export class PinField {
             const color = this.getHeightColor(normalizedHeight);
             this.instancedMesh.setColorAt(pinIndex, color);
             needsColorUpdate = true;
-          } else if (this.instancedMesh.instanceColor) {
-            // Ensure white color when colorByHeight is disabled
-            this.instancedMesh.setColorAt(pinIndex, new THREE.Color(0xffffff));
-            needsColorUpdate = true;
           }
 
           // Update previous height
@@ -747,18 +755,22 @@ export class PinField {
       this.initializeHeightArrays();
     }
 
-    // If colorByHeight changed, update material vertexColors and pin colors
+    // If colorByHeight changed, switch materials and update pin colors
     if (
       newConfig.colorByHeight !== undefined &&
       newConfig.colorByHeight !== oldColorByHeight
     ) {
-      // Update material vertexColors setting
-      if (this.instancedMesh.material instanceof THREE.MeshStandardMaterial) {
-        this.instancedMesh.material.vertexColors = this.config.colorByHeight;
+      if (this.instancedMesh) {
+        this.instancedMesh.material = this.config.colorByHeight
+          ? this.colorByHeightMaterial
+          : this.pinMaterial;
         this.instancedMesh.material.needsUpdate = true;
       }
-      // Update all pin colors
-      this.updateAllPinColors();
+
+      // When enabling debug mode, compute colors for all pins immediately
+      if (this.config.colorByHeight) {
+        this.updateAllPinColors();
+      }
     }
   }
 

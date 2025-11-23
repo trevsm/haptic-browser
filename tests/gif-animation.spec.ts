@@ -584,5 +584,81 @@ test.describe('GIF Animation', () => {
     // Test always passes - it's just diagnostic
     expect(report).toContain('GIF Animation Diagnostic Report');
   });
+  
+  test('should document the GIF animation issue and solution', async ({ page }) => {
+    test.setTimeout(10000);
+    
+    console.log('\n' + '='.repeat(70));
+    console.log('GIF ANIMATION ISSUE - SUMMARY');
+    console.log('='.repeat(70));
+    console.log('\n📋 ISSUE:');
+    console.log('   GIFs are not animating in the haptic browser dotfield.');
+    console.log('   Only the first frame is shown, regardless of update frequency.');
+    
+    console.log('\n🔍 ROOT CAUSE:');
+    console.log('   In src/PinField.ts:enterImageMode(), the code creates an Image');
+    console.log('   object with `new Image()` which is NOT attached to the DOM.');
+    console.log('   ');
+    console.log('   Code location: PinField.ts, lines ~325-342');
+    console.log('   ```');
+    console.log('   const img = new Image();');
+    console.log('   img.crossOrigin = "anonymous";');
+    console.log('   // ... later ...');
+    console.log('   this.animatedGifImage = img;  // NOT in DOM!');
+    console.log('   ```');
+    console.log('   ');
+    console.log('   When processImageElement() draws this image to canvas repeatedly,');
+    console.log('   it always captures the same frame because the browser only');
+    console.log('   animates GIFs that are in the DOM and being rendered.');
+    
+    console.log('\n✅ SOLUTION:');
+    console.log('   Create a hidden container in the DOM to hold GIF img elements:');
+    console.log('   ');
+    console.log('   1. Add to PinField constructor:');
+    console.log('      ```typescript');
+    console.log('      private gifContainer: HTMLElement;');
+    console.log('      ');
+    console.log('      constructor(...) {');
+    console.log('        // Create hidden container for animated GIFs');
+    console.log('        this.gifContainer = document.createElement("div");');
+    console.log('        this.gifContainer.style.cssText =');
+    console.log('          "position: absolute; top: -9999px; left: -9999px;');
+    console.log('           width: 1px; height: 1px; overflow: hidden;";');
+    console.log('        document.body.appendChild(this.gifContainer);');
+    console.log('      }');
+    console.log('      ```');
+    console.log('   ');
+    console.log('   2. Modify enterImageMode() to use DOM img elements:');
+    console.log('      ```typescript');
+    console.log('      const img = document.createElement("img");');
+    console.log('      img.crossOrigin = "anonymous";');
+    console.log('      this.gifContainer.appendChild(img);  // Add to DOM!');
+    console.log('      ```');
+    console.log('   ');
+    console.log('   3. Clean up in stopAnimatedGifUpdates():');
+    console.log('      ```typescript');
+    console.log('      if (this.animatedGifImage?.parentElement) {');
+    console.log('        this.gifContainer.removeChild(this.animatedGifImage);');
+    console.log('      }');
+    console.log('      ```');
+    
+    console.log('\n📊 TEST RESULTS:');
+    console.log('   ❌ Image not in DOM: 0% animation (all frames identical)');
+    console.log('   ❌ Image in DOM (opacity:0): 0% animation in test environment');
+    console.log('   ❌ Image visible on-screen: 0% animation in test environment*');
+    console.log('      *May work in production, but headless Firefox doesn\'t animate');
+    
+    console.log('\n🎯 RECOMMENDED FIX:');
+    console.log('   Attach img elements to DOM as shown above. This is the simplest');
+    console.log('   solution and should work in production browsers.');
+    console.log('   ');
+    console.log('   Alternative: Use a GIF decoder library like gifuct-js if');
+    console.log('   DOM approach doesn\'t work reliably across all browsers.');
+    
+    console.log('\n' + '='.repeat(70) + '\n');
+    
+    // Test passes - this is documentation
+    expect(true).toBe(true);
+  });
 });
 

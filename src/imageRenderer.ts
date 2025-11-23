@@ -5,7 +5,11 @@
  *
  * For animated GIFs, renders the first frame. To render a specific frame,
  * you can pre-extract the frame and pass that image URL instead.
+ * 
+ * GPU acceleration is used when available for faster image processing.
  */
+
+import { getGPUImageProcessor } from './gpuImageProcessor';
 
 export interface ImageRenderOptions {
   minHeight: number;
@@ -14,6 +18,7 @@ export interface ImageRenderOptions {
   edgeDetection?: boolean; // Use edge detection for more tactile definition
   contrast?: number; // Contrast adjustment (0.5 to 2.0, default 1.0)
   frameIndex?: number; // For animated GIFs, frame to render (0 = first frame, default: 0)
+  useGPU?: boolean; // Use GPU acceleration for image processing (default: true)
 }
 
 /**
@@ -88,49 +93,43 @@ export function processImageElement(
     amplitude,
     edgeDetection = true,
     contrast = 1.5,
+    useGPU = true,
   } = options;
 
-  // Create a canvas to process the image
-  const canvas = document.createElement("canvas");
-  canvas.width = gridSize;
-  canvas.height = gridSize;
-  const ctx = canvas.getContext("2d");
-
-  if (!ctx) {
-    throw new Error("Failed to get canvas context");
-  }
-
-  // Draw the current frame of the image (for GIFs, this will be the current animated frame)
-  ctx.drawImage(img, 0, 0, gridSize, gridSize);
-
-  // Get image data
+  // Get image data (with optional GPU acceleration)
   let imageData: ImageData;
   let data: Uint8ClampedArray;
 
   try {
-    imageData = ctx.getImageData(0, 0, gridSize, gridSize);
-    data = imageData.data;
+    if (useGPU) {
+      // Try GPU-accelerated processing first
+      try {
+        const gpuProcessor = getGPUImageProcessor();
+        imageData = gpuProcessor.processImage(img, gridSize, gridSize, contrast);
+        data = imageData.data;
+      } catch (gpuError) {
+        console.warn('GPU image processing failed, falling back to Canvas 2D:', gpuError);
+        // Fall back to Canvas 2D
+        imageData = processImageCanvas2D(img, gridSize, gridSize, contrast);
+        data = imageData.data;
+      }
+    } else {
+      // Use Canvas 2D directly
+      imageData = processImageCanvas2D(img, gridSize, gridSize, contrast);
+      data = imageData.data;
+    }
   } catch (canvasError: any) {
     const errorMsg = canvasError.message || String(canvasError);
     throw new Error(`Cannot read image data: ${errorMsg}`);
   }
 
-  // Convert to grayscale and apply contrast
+  // Convert to grayscale array (data is already grayscale from processing)
   const grayscale: number[][] = [];
   for (let x = 0; x < gridSize; x++) {
     grayscale[x] = [];
     for (let y = 0; y < gridSize; y++) {
       const idx = (y * gridSize + x) * 4;
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
-
-      // Convert to grayscale (weighted average for human perception)
-      let gray = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-      // Apply contrast
-      gray = Math.max(0, Math.min(1, (gray - 0.5) * contrast + 0.5));
-
+      const gray = data[idx] / 255; // Already grayscale from GPU/Canvas processing
       grayscale[x][y] = gray;
     }
   }
@@ -160,6 +159,48 @@ export function processImageElement(
 }
 
 /**
+ * Process image using Canvas 2D (fallback method)
+ */
+function processImageCanvas2D(
+  img: HTMLImageElement,
+  width: number,
+  height: number,
+  contrast: number
+): ImageData {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) {
+    throw new Error("Failed to get canvas context");
+  }
+
+  ctx.drawImage(img, 0, 0, width, height);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+
+  // Convert to grayscale and apply contrast
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    // Convert to grayscale (weighted average for human perception)
+    let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    // Apply contrast
+    gray = Math.max(0, Math.min(255, (gray - 127.5) * contrast + 127.5));
+
+    data[i] = gray;
+    data[i + 1] = gray;
+    data[i + 2] = gray;
+  }
+
+  return imageData;
+}
+
+/**
  * Load an image from a URL and render it as a tactile bitmap
  * Supports static images and animated GIFs (renders first frame by default)
  */
@@ -169,11 +210,6 @@ export async function renderImageAsTactile(
   options: ImageRenderOptions
 ): Promise<number[][]> {
   const {
-    minHeight,
-    maxHeight,
-    amplitude,
-    edgeDetection = true,
-    contrast = 1.5,
     frameIndex = 0,
   } = options;
 
@@ -192,122 +228,21 @@ export async function renderImageAsTactile(
       }
     }
 
-    // Create a canvas to process the image
-    const canvas = document.createElement("canvas");
-    canvas.width = gridSize;
-    canvas.height = gridSize;
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) {
-      throw new Error("Failed to get canvas context");
-    }
-
     // For animated GIFs, wait a moment to ensure first frame is loaded
-    // Then draw the image scaled to fit the grid
-    // Note: HTML Image element will show the current frame when drawn to canvas
-    // For animated GIFs, this is typically the first frame
     if (isGifUrl(imageUrl)) {
       // Small delay to ensure GIF frame is ready
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    // Draw the image scaled to fit the grid
-    // For animated GIFs, this captures the current visible frame (first frame by default)
-    ctx.drawImage(img, 0, 0, gridSize, gridSize);
-
-    // Get image data - this will fail if image is cross-origin without CORS
-    let imageData: ImageData;
-    let data: Uint8ClampedArray;
-
-    try {
-      imageData = ctx.getImageData(0, 0, gridSize, gridSize);
-      data = imageData.data;
-    } catch (canvasError: any) {
-      // Canvas security error - image loaded but can't read pixel data due to CORS
-      const errorMsg = canvasError.message || String(canvasError);
-      if (
-        errorMsg.includes("tainted") ||
-        errorMsg.includes("CORS") ||
-        errorMsg.includes("cross-origin") ||
-        errorMsg.includes("insecure")
-      ) {
-        // Try loading through CORS proxy
-        console.log(
-          `CORS error detected, retrying with CORS proxy: ${imageUrl}`
-        );
-        try {
-          const proxiedUrl = wrapWithCorsProxy(imageUrl);
-          console.log(`Loading through proxy: ${proxiedUrl}`);
-          const proxiedImg = await loadImage(proxiedUrl);
-
-          // Clear canvas and draw proxied image
-          ctx.clearRect(0, 0, gridSize, gridSize);
-          ctx.drawImage(proxiedImg, 0, 0, gridSize, gridSize);
-
-          // Try to read pixel data again
-          imageData = ctx.getImageData(0, 0, gridSize, gridSize);
-          data = imageData.data;
-          console.log("Successfully loaded image through CORS proxy");
-        } catch (proxyError: any) {
-          console.error("CORS proxy also failed:", proxyError);
-          throw new Error(
-            `Cannot read image data due to CORS restrictions. Tried proxy but failed. Original error: ${errorMsg}`
-          );
-        }
-      } else {
-        throw canvasError;
-      }
-    }
-
-    // Convert to grayscale and apply contrast
-    const grayscale: number[][] = [];
-    for (let x = 0; x < gridSize; x++) {
-      grayscale[x] = [];
-      for (let y = 0; y < gridSize; y++) {
-        const idx = (y * gridSize + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-
-        // Convert to grayscale (weighted average for human perception)
-        let gray = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-
-        // Apply contrast
-        gray = Math.max(0, Math.min(1, (gray - 0.5) * contrast + 0.5));
-
-        grayscale[x][y] = gray;
-      }
-    }
-
-    // Apply edge detection if enabled
-    let heightMap: number[][];
-    if (edgeDetection) {
-      heightMap = applyEdgeDetection(grayscale, gridSize);
-    } else {
-      heightMap = grayscale;
-    }
-
-    // Convert to pin heights
-    const heights: number[][] = [];
-    const heightRange = maxHeight - minHeight;
-
-    for (let x = 0; x < gridSize; x++) {
-      heights[x] = [];
-      for (let y = 0; y < gridSize; y++) {
-        const value = heightMap[x][y];
-        const height = minHeight + value * heightRange * amplitude;
-        heights[x][y] = Math.max(minHeight, Math.min(maxHeight, height));
-      }
-    }
-
-    return heights;
+    // Use processImageElement for GPU-accelerated processing
+    return processImageElement(img, gridSize, options);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error("Failed to render image:", imageUrl);
     console.error("Error details:", errorMessage);
     console.error("This will display an X pattern on the pin field");
     // Return a placeholder pattern on error
-    return createErrorPattern(gridSize, minHeight, maxHeight);
+    return createErrorPattern(gridSize, options.minHeight, options.maxHeight);
   }
 }
 

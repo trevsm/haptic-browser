@@ -7,6 +7,15 @@ import type { SimulationConfig } from './config';
 import { NavigationManager } from './navigation';
 import { createWikipediaDemo } from './demos/wikipedia';
 import type { ContentBlock } from './shapePage';
+import { 
+  detectGPUCapabilities, 
+  getOptimalRendererSettings, 
+  getOptimalPixelRatio,
+  getOptimalShadowMapSize,
+  logGPUUtilization,
+  setupContextLossHandling,
+  type GPUCapabilities 
+} from './gpuUtils';
 import './style.css';
 
 /**
@@ -25,6 +34,7 @@ class HapticBrowser {
   
   private clock!: THREE.Clock;
   private navigationManager!: NavigationManager;
+  private gpuCapabilities!: GPUCapabilities;
 
   constructor() {
     // Ensure DOM is ready
@@ -91,11 +101,19 @@ class HapticBrowser {
         this.updateLoader(message, progress);
       };
       
-      this.updateLoader('Checking WebGL support...', 5);
+      this.updateLoader('Detecting GPU capabilities...', 5);
+      
+      // Detect GPU capabilities
+      this.gpuCapabilities = detectGPUCapabilities();
+      logGPUUtilization(this.gpuCapabilities);
       
       // Check WebGL support
-      if (!this.isWebGLAvailable()) {
-        throw new Error('WebGL is not supported in this browser');
+      if (!this.gpuCapabilities.webgl1Supported) {
+        throw new Error('WebGL is not supported in this browser. Please update your browser or enable hardware acceleration.');
+      }
+      
+      if (!this.gpuCapabilities.isGPUAvailable) {
+        console.warn('⚠ Running in software rendering mode. Performance may be limited.');
       }
       
       this.updateLoader('Initializing Three.js scene...', 10);
@@ -116,17 +134,39 @@ class HapticBrowser {
       
       this.updateLoader('Setting up renderer...', 15);
       
-      // Setup renderer with performance optimizations
+      // Get optimal renderer settings based on GPU capabilities
+      const rendererSettings = getOptimalRendererSettings(this.gpuCapabilities);
+      
+      // Setup renderer with GPU-optimized settings
       this.renderer = new THREE.WebGLRenderer({ 
-        antialias: false, // Disable antialiasing for performance (can re-enable if needed)
-        powerPreference: 'high-performance' // Prefer performance over quality
+        antialias: rendererSettings.antialias,
+        powerPreference: rendererSettings.powerPreference,
+        precision: rendererSettings.precision,
+        logarithmicDepthBuffer: rendererSettings.logarithmicDepthBuffer,
+        preserveDrawingBuffer: rendererSettings.preserveDrawingBuffer,
+        failIfMajorPerformanceCaveat: rendererSettings.failIfMajorPerformanceCaveat,
+        alpha: false, // Opaque background for better performance
+        stencil: false, // Disable stencil buffer if not needed
       });
+      
       this.renderer.setSize(window.innerWidth, window.innerHeight);
-      // Cap pixel ratio at 1.5 for performance (or use devicePixelRatio if on high-DPI display)
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-      this.renderer.shadowMap.enabled = true; // Enable shadows for realism
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Soft shadows
-      this.renderer.sortObjects = false; // Disable sorting for instanced meshes (slight performance gain)
+      
+      // Set optimal pixel ratio based on GPU capabilities
+      const optimalPixelRatio = getOptimalPixelRatio(this.gpuCapabilities);
+      this.renderer.setPixelRatio(optimalPixelRatio);
+      console.log(`Using pixel ratio: ${optimalPixelRatio}x (device: ${window.devicePixelRatio}x)`);
+      
+      // Configure shadows based on GPU capabilities
+      if (this.gpuCapabilities.isGPUAvailable) {
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Soft shadows for quality
+        console.log('✓ Shadow mapping enabled');
+      } else {
+        this.renderer.shadowMap.enabled = false;
+        console.log('⚠ Shadow mapping disabled for software rendering');
+      }
+      
+      this.renderer.sortObjects = false; // Disable sorting for instanced meshes (performance gain)
       
       // Ensure canvas is visible
       const canvas = this.renderer.domElement;
@@ -137,6 +177,21 @@ class HapticBrowser {
       canvas.style.width = '100%';
       canvas.style.height = '100%';
       canvas.style.zIndex = '0';
+      
+      // Setup WebGL context loss handling for GPU robustness
+      setupContextLossHandling(
+        canvas,
+        () => {
+          // Context lost - pause rendering
+          console.error('⚠ GPU context lost. Pausing rendering...');
+        },
+        () => {
+          // Context restored - resume rendering
+          console.log('✓ GPU context restored. Resuming rendering...');
+          // Force a full re-render
+          this.renderer.render(this.scene, this.camera);
+        }
+      );
       
       const appContent = document.getElementById('app-content');
       if (appContent) {
@@ -256,19 +311,30 @@ class HapticBrowser {
     // Main directional key light with soft shadows - Apple product photography style
     const keyLight = new THREE.DirectionalLight(0xffffff, 1.0);
     keyLight.position.set(30, 45, 25);
-    keyLight.castShadow = true;
-    // High quality shadow map settings
-    keyLight.shadow.mapSize.width = 2048;
-    keyLight.shadow.mapSize.height = 2048;
-    keyLight.shadow.camera.near = 0.5;
-    keyLight.shadow.camera.far = 100;
-    keyLight.shadow.camera.left = -30;
-    keyLight.shadow.camera.right = 30;
-    keyLight.shadow.camera.top = 30;
-    keyLight.shadow.camera.bottom = -30;
-    keyLight.shadow.bias = -0.0001;
-    keyLight.shadow.normalBias = 0.02;
-    keyLight.shadow.radius = 3; // Softer shadows for Apple aesthetic
+    
+    // Enable shadows only if GPU is available
+    if (this.gpuCapabilities.isGPUAvailable) {
+      keyLight.castShadow = true;
+      
+      // Adaptive shadow map quality based on GPU capabilities
+      const shadowMapSize = getOptimalShadowMapSize(this.gpuCapabilities);
+      keyLight.shadow.mapSize.width = shadowMapSize;
+      keyLight.shadow.mapSize.height = shadowMapSize;
+      console.log(`Shadow map size: ${shadowMapSize}x${shadowMapSize}`);
+      
+      keyLight.shadow.camera.near = 0.5;
+      keyLight.shadow.camera.far = 100;
+      keyLight.shadow.camera.left = -30;
+      keyLight.shadow.camera.right = 30;
+      keyLight.shadow.camera.top = 30;
+      keyLight.shadow.camera.bottom = -30;
+      keyLight.shadow.bias = -0.0001;
+      keyLight.shadow.normalBias = 0.02;
+      keyLight.shadow.radius = 3; // Softer shadows for Apple aesthetic
+    } else {
+      keyLight.castShadow = false;
+    }
+    
     this.scene.add(keyLight);
     
     // Fill light from opposite side for minimal shadows - Apple-style studio lighting
@@ -705,14 +771,6 @@ class HapticBrowser {
     }
   }
 
-  private isWebGLAvailable(): boolean {
-    try {
-      const canvas = document.createElement('canvas');
-      return !!(canvas.getContext('webgl') || canvas.getContext('webgl2'));
-    } catch (e) {
-      return false;
-    }
-  }
 
   /**
    * Load Wikipedia demo page
