@@ -120,18 +120,18 @@ The simulation succeeds if:
 
 ### Current Phase: Baseline Simulation
 - [x] Project setup
-- [ ] Basic Three.js scene with camera controls
-- [ ] Pin field geometry system
-- [ ] Parameter controls UI
-- [ ] Terrain/wave patterns
-- [ ] Lighting for relief emphasis
+- [x] Basic Three.js scene with camera controls
+- [x] Pin field geometry system
+- [x] Parameter controls UI
+- [x] Terrain/wave patterns
+- [x] Lighting for relief emphasis
 
 ### Near-Term Expansion
 - [ ] Press interaction and ripples
 - [ ] Cursor/focus indicator
-- [ ] Tactile UI primitives library (button, card, text block, slider)
+- [x] Tactile UI primitives library (button, card, text block, slider)
 - [ ] HTML → tactile geometry pipeline
-- [ ] Braille text rendering
+- [x] Braille text rendering
 
 ### Future Vision
 - [ ] Real webpage rendering as tactile layouts
