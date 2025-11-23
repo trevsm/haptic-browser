@@ -2,6 +2,9 @@
 
 A visual simulation of a tactile pin display device for web browsing by visually impaired users.
 
+<img width="934" height="691" alt="image" src="https://github.com/user-attachments/assets/49a4548c-0489-4d28-a7d9-65d7f3033121" />
+
+
 ## Concept
 
 The Haptic Browser simulates a flat tabletop device with a dense array of independently actuated vertical pins. The pin tops collectively form a continuously reconfigurable 3D relief surface. This surface can represent:
