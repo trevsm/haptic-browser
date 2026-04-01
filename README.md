@@ -1,5 +1,7 @@
 # Haptic Browser Model
 
+**Live site:** [trevsm.github.io/Haptic-Browser-Model](https://trevsm.github.io/Haptic-Browser-Model/)
+
 A visual simulation of a tactile pin display device for web browsing by visually impaired users.
 
 <img width="934" height="691" alt="image" src="https://github.com/user-attachments/assets/49a4548c-0489-4d28-a7d9-65d7f3033121" />
@@ -152,7 +154,7 @@ npm install
 npm run dev
 ```
 
-Visit `http://localhost:5173` to see the simulation.
+Visit `http://localhost:5173` to see the simulation. To preview a production build with the same URL base as GitHub Pages, run `npm run preview:pages` (opens the preview server; open the printed URL including `/Haptic-Browser-Model/`).
 
 ## Visual Design
 

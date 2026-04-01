@@ -27,6 +27,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
 
       - name: Copy build to docs folder
         run: |
