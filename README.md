@@ -1,4 +1,4 @@
-# Haptic Browser
+# Haptic Browser Model
 
 A visual simulation of a tactile pin display device for web browsing by visually impaired users.
 
